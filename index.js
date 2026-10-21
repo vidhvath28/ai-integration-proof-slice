@@ -44,9 +44,16 @@ function fakeModel() {
 // Return an object with only the safe fields (no secrets).
 // ============================================================
 function buildContext() {
+  // Allow-list, not deny-list: name exactly the fields the model may see, so a
+  // new private field added to `incident` later never leaks by default.
+  // reporterEmail (personal data) and internalToken (a credential) stay out.
+  // `incident.id` is also left out: the model doesn't need it to judge severity,
+  // and the app (not the model) links the suggestion back to the incident.
   return {
-    // fill this in: title, currentSeverity, service, timeline...
-    // but NOT reporterEmail or internalToken
+    title: incident.title,
+    currentSeverity: incident.currentSeverity,
+    service: incident.service,
+    timeline: [...timeline] // a copy, so nothing downstream can edit the real timeline
   };
 }
 
@@ -56,7 +63,17 @@ function buildContext() {
 // AND there is a non-empty reason.
 // ============================================================
 function isValid(answer) {
-  return false; // fill this in
+  // Model output is untrusted until checked here: it could be null, a string,
+  // an array, or an object with a made-up severity like "URGENT".
+  if (answer === null || typeof answer !== 'object' || Array.isArray(answer)) return false;
+
+  // Exact match against the allowed list: "high" or "Urgent" are rejected, not guessed at.
+  if (!SEVERITIES.includes(answer.suggestedSeverity)) return false;
+
+  // A reason must be real text: rejects a missing reason, a number, "" and "   ".
+  if (typeof answer.reason !== 'string' || answer.reason.trim() === '') return false;
+
+  return true;
 }
 
 // ============================================================
@@ -64,7 +81,13 @@ function isValid(answer) {
 // Return a short message so the workflow still makes sense.
 // ============================================================
 function fallback() {
-  return { status: 'MANUAL_REVIEW', message: '' /* fill this in */ };
+  // No severity is suggested or applied: the real severity is left exactly as it was,
+  // and the responder sets it by hand, as they would without the AI feature.
+  return {
+    status: 'MANUAL_REVIEW',
+    message: `AI severity suggestion is unavailable for ${incident.id}. ` +
+      `Severity stays ${incident.currentSeverity}. Please review the timeline and set it manually.`
+  };
 }
 
 // ── Given to you: runs one request start to finish. ──
